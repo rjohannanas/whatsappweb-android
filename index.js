@@ -1,5 +1,6 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
+const qrcode = require('qrcode-terminal'); // Para mostrar el QR en la terminal
 const readline = require('readline'); // Importamos la librería de lectura
 const { procesarMensaje } = require('./logica');
 
@@ -14,15 +15,20 @@ async function connectToWhatsApp() {
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true,
+        // printQRInTerminal: true, // Opción obsoleta, la eliminamos
         logger: pino({ level: 'silent' }),
         browser: ["Termux Console", "Chrome", "1.0.0"]
     });
 
     // Eventos de conexión
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
         
+        // Si hay un código QR, lo mostramos en la terminal
+        if(qr) {
+            qrcode.generate(qr, {small: true});
+        }
+
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Reconectando...', shouldReconnect);
