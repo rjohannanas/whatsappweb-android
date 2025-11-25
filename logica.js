@@ -1,4 +1,5 @@
 const config = require('./config');
+const axios = require('axios'); // Importamos axios
 
 async function procesarMensaje(sock, m) {
     if (!m.message) return;
