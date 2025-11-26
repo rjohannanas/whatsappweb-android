@@ -1,5 +1,6 @@
 const config = require('./config');
-const axios = require('axios'); // Importamos axios
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
 
 async function procesarMensaje(sock, m) {
     if (!m.message) return;
@@ -39,6 +40,31 @@ async function procesarMensaje(sock, m) {
             image: { url: 'https://cataas.com/cat' },
             caption: 'Miau 🐱'
         });
+    }
+
+    // --- COMANDO 4: GEMINI (Directo desde Node.js) ---
+    if (comando.startsWith(`${config.prefix}gemini`)) {
+        // Inicializamos el modelo de Gemini con la clave de la configuración
+        const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-pro"});
+
+        const prompt = texto.substring(comando.indexOf('gemini') + 6).trim();
+
+        if (!prompt) {
+            return await sock.sendMessage(remitente, { text: 'Debes escribir una pregunta. Uso: !gemini ¿qué es un agujero negro?' });
+        }
+
+        try {
+            console.log(`🤖 Enviando prompt a Gemini: "${prompt}"`);
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            const textResponse = response.text();
+            
+            await sock.sendMessage(remitente, { text: textResponse });
+        } catch (error) {
+            console.error('❌ Error al contactar con Gemini:', error);
+            await sock.sendMessage(remitente, { text: '🤖 Hubo un problema al conectar con la IA. Inténtalo de nuevo.' });
+        }
     }
 }
 

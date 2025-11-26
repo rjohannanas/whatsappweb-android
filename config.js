@@ -1,7 +1,6 @@
+// En tu archivo config.js
 module.exports = {
-
-    numeroObjetivo: "51961958247@s.whatsapp.net", 
-    
-    // El símbolo para activar el bot
-    prefix: "!"
+    prefix: '!',
+    numeroObjetivo: '51999999999@s.whatsapp.net', // Tu número para avisos
+    GEMINI_API_KEY: 'AIzaSyAg_QAn-nmEnNSRSEJ4fI-Voioscn5NY0c' // <-- AÑADE TU CLAVE DE GEMINI AQUÍ
 };
