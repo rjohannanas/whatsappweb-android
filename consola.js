@@ -19,7 +19,7 @@ function iniciarConsola(sock) {
 
         if (comando === 'salir') {
             console.log('Cerrando bot...');
-            await sock.logout(); // Cierra la sesión de WhatsApp
+            // await sock.logout(); // Cierra la sesión de WhatsApp (Eliminado para mantener sesión)
             process.exit(0);
         }
 
