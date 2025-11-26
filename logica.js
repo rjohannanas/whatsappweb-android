@@ -48,7 +48,10 @@ async function procesarMensaje(sock, m) {
         const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: "gemini-pro"});
 
-        const prompt = texto.substring(comando.indexOf('gemini') + 6).trim();
+        // CORRECCIÓN: La forma correcta de extraer la pregunta.
+        // Quitamos el prefijo y la palabra "gemini" para obtener el prompt limpio.
+        const comandoCompleto = `${config.prefix}gemini`;
+        const prompt = texto.substring(comandoCompleto.length).trim();
 
         if (!prompt) {
             return await sock.sendMessage(remitente, { text: 'Debes escribir una pregunta. Uso: !gemini ¿qué es un agujero negro?' });
