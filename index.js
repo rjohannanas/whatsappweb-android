@@ -1,6 +1,7 @@
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal'); // Para mostrar el QR en la terminal
+const readline = require('readline'); // Para leer la entrada del usuario
 const { procesarMensaje } = require('./logica');
 const { iniciarConsola } = require('./consola'); // Importamos el módulo de la consola
 
@@ -22,26 +23,55 @@ async function connectToWhatsApp() {
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        // printQRInTerminal: true, // Opción obsoleta, la eliminamos
+        printQRInTerminal: false, // Desactivamos la impresión automática del QR
         browser: ["Termux Console", "Chrome", "1.0.0"]
     });
 
+    // Si no estamos registrados, preguntamos el método de conexión
+    if (!sock.authState.creds.registered) {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        const question = (query) => new Promise((resolve) => rl.question(query, resolve));
+
+        const choice = await question("¿Cómo deseas conectar?\n1. Con código QR\n2. Con código de emparejamiento\nElige una opción: ");
+
+        if (choice.trim() === '2') {
+            const phoneNumber = await question("Por favor, ingresa tu número de teléfono (ej: 5211234567890): ");
+            const code = await sock.requestPairingCode(phoneNumber.trim());
+            console.log(`\nTu código de emparejamiento es: ${code}\n`);
+        }
+        // Para la opción '1' (QR), no hacemos nada extra, el evento 'connection.update' lo gestionará.
+
+        rl.close();
+    }
+
     // Eventos de conexión
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         // Si hay un código QR, lo mostramos en la terminal
         if (qr) {
+            console.log("\nEscanea el siguiente código QR con tu teléfono:");
             qrcode.generate(qr, { small: true });
         }
 
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('Reconectando...', shouldReconnect);
-            if (shouldReconnect) connectToWhatsApp();
+            const statusCode = (lastDisconnect.error)?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+            if (statusCode === DisconnectReason.connectionClosed || statusCode === DisconnectReason.connectionLost || statusCode === DisconnectReason.timedOut) {
+                console.log('Conexión perdida. Reconectando...');
+                connectToWhatsApp();
+            } else if (shouldReconnect) {
+                console.log('Reconectando...', shouldReconnect);
+                connectToWhatsApp();
+            }
         } else if (connection === 'open') {
             console.log('\n✅ Bot conectado!');
-            // Iniciamos la consola solo cuando el bot está conectado
+            // Iniciamos la consola solo cuando el bot está conectado. [1]
             iniciarConsola(sock);
         }
     });
