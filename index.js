@@ -22,59 +22,36 @@ async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
     const sock = makeWASocket({
+
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false, // Desactivamos la impresión automática del QR
         browser: ["Termux Console", "Chrome", "1.0.0"]
     });
 
-    // Variable para controlar si el código de emparejamiento ya fue solicitado
-    let pairingCodeRequested = false;
+    // Variable para rastrear el estado de conexión
+    let isConnected = false;
 
-    // Si no estamos registrados, preguntamos el método de conexión
-    if (!sock.authState.creds.registered) {
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-        });
-
-        const question = (query) => new Promise((resolve) => rl.question(query, resolve));
-
-        const choice = await question("¿Cómo deseas conectar?\n1. Con código QR\n2. Con código de emparejamiento\nElige una opción: ");
-
-        if (choice.trim() === '2') {
-            const phoneNumber = await question("Por favor, ingresa tu número de teléfono (ej: 5211234567890): ");
-            const code = await sock.requestPairingCode(phoneNumber.trim());
-            console.log(`\nTu código de emparejamiento es: ${code}\n`);
-            pairingCodeRequested = true; // Marcamos que se solicitó el código
-        }
-        // Para la opción '1' (QR), no hacemos nada extra, el evento 'connection.update' lo gestionará.
-
-        rl.close();
-    }
-
-    // Eventos de conexión
+    // Eventos de conexión (Definimos esto ANTES de preguntar, para detectar si se conecta solo)
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         // Si hay un código QR, lo mostramos en la terminal
-        if (qr) {
+        if (qr && !isConnected) { // Solo si no estamos conectados
             console.log("\nEscanea el siguiente código QR con tu teléfono:");
             qrcode.generate(qr, { small: true });
         }
 
         if (connection === 'close') {
+            isConnected = false;
             const statusCode = (lastDisconnect.error)?.output?.statusCode;
             const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
             // Si se solicitó un código de emparejamiento, no intentamos reconectar inmediatamente.
-            // El usuario necesita tiempo para introducir el código. La conexión se abrirá o cerrará definitivamente.
             if (pairingCodeRequested && (statusCode === DisconnectReason.timedOut || !statusCode)) {
-                return; // Simplemente salimos para evitar el bucle de reconexión
+                return;
             }
 
-            // Si el error es 'Logged Out', significa que la sesión es inválida.
-            // Borramos la carpeta de sesión y reiniciamos el proceso.
             if (statusCode === DisconnectReason.loggedOut) {
                 console.log('❌ Sesión inválida o cerrada desde otro dispositivo. Eliminando credenciales y reiniciando...');
                 fs.rmSync('./auth_info_baileys', { recursive: true, force: true });
@@ -89,7 +66,14 @@ async function connectToWhatsApp() {
             }
         } else if (connection === 'open') {
             console.log('\n✅ Bot conectado!');
-            // Iniciamos la consola solo cuando el bot está conectado. [1]
+            isConnected = true;
+
+            // Si estábamos esperando input del usuario, cerramos la interfaz para liberar la consola
+            if (global.rlPrompt) {
+                global.rlPrompt.close();
+                global.rlPrompt = null;
+            }
+            // Iniciamos la consola solo cuando el bot está conectado.
             iniciarConsola(sock);
         }
     });
@@ -101,6 +85,55 @@ async function connectToWhatsApp() {
         const m = messages[0];
         await procesarMensaje(sock, m);
     });
+
+    // Variable para controlar si el código de emparejamiento ya fue solicitado
+    let pairingCodeRequested = false;
+
+    // Si no estamos registrados, preguntamos el método de conexión
+    // Usamos global.rlPrompt para poder cerrarlo desde el evento 'open' si se conecta solo
+    if (!sock.authState.creds.registered) {
+
+        // Pequeña espera para ver si se conecta automáticamente con credenciales cacheadas
+        // Esto evita mostrar el menú si la sesión es válida pero 'registered' aparece como false temporalmente
+        console.log("⏳ Verificando sesión existente...");
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        if (!isConnected) {
+            console.log(`[Debug] No se detectó conexión automática.Iniciando asistente...`);
+
+            global.rlPrompt = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout
+            });
+
+            const question = (query) => new Promise((resolve) => {
+                // Si ya se cerró (porque se conectó mientras esperábamos), resolvemos inmediato
+                if (!global.rlPrompt) return resolve('');
+
+                global.rlPrompt.question(query, resolve);
+                // Si se cierra la interfaz (por conexión exitosa), resolvemos para desbloquear el await
+                global.rlPrompt.on('close', () => resolve(''));
+            });
+
+            const choice = await question("¿Cómo deseas conectar?\n1. Con código QR\n2. Con código de emparejamiento\nElige una opción: ");
+
+            if (choice && choice.trim() === '2') {
+                const phoneNumber = await question("Por favor, ingresa tu número de teléfono (ej: 5211234567890): ");
+                if (phoneNumber) { // Solo si no se canceló
+                    const code = await sock.requestPairingCode(phoneNumber.trim());
+                    console.log(`\nTu código de emparejamiento es: ${code}\n`);
+                    pairingCodeRequested = true;
+                }
+            }
+
+            // Si la interfaz sigue abierta, la cerramos
+            if (global.rlPrompt) {
+                global.rlPrompt.close();
+                global.rlPrompt = null;
+            }
+        }
+    }
 }
 
 connectToWhatsApp();
+
