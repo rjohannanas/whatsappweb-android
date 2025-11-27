@@ -22,7 +22,6 @@ async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
 
     const sock = makeWASocket({
-
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false, // Desactivamos la impresión automática del QR
@@ -31,13 +30,19 @@ async function connectToWhatsApp() {
 
     // Variable para rastrear el estado de conexión
     let isConnected = false;
+    let lastQR = null;
+    let isCheckingSession = true;
 
     // Eventos de conexión (Definimos esto ANTES de preguntar, para detectar si se conecta solo)
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // Si hay un código QR, lo mostramos en la terminal
-        if (qr && !isConnected) { // Solo si no estamos conectados
+        if (qr) {
+            lastQR = qr;
+        }
+
+        // Si hay un código QR, lo mostramos en la terminal SOLO si no estamos verificando ni preguntando
+        if (qr && !isConnected && !isCheckingSession && !global.rlPrompt) {
             console.log("\nEscanea el siguiente código QR con tu teléfono:");
             qrcode.generate(qr, { small: true });
         }
@@ -67,6 +72,7 @@ async function connectToWhatsApp() {
         } else if (connection === 'open') {
             console.log('\n✅ Bot conectado!');
             isConnected = true;
+            isCheckingSession = false; // Ya conectó, no estamos verificando
 
             // Si estábamos esperando input del usuario, cerramos la interfaz para liberar la consola
             if (global.rlPrompt) {
@@ -97,9 +103,10 @@ async function connectToWhatsApp() {
         // Esto evita mostrar el menú si la sesión es válida pero 'registered' aparece como false temporalmente
         console.log("⏳ Verificando sesión existente...");
         await new Promise(resolve => setTimeout(resolve, 3000));
+        isCheckingSession = false; // Terminó la verificación inicial
 
         if (!isConnected) {
-            console.log(`[Debug] No se detectó conexión automática.Iniciando asistente...`);
+            console.log(`[Debug] No se detectó conexión automática. Iniciando asistente...`);
 
             global.rlPrompt = readline.createInterface({
                 input: process.stdin,
@@ -117,17 +124,34 @@ async function connectToWhatsApp() {
 
             const choice = await question("¿Cómo deseas conectar?\n1. Con código QR\n2. Con código de emparejamiento\nElige una opción: ");
 
-            if (choice && choice.trim() === '2') {
-                const phoneNumber = await question("Por favor, ingresa tu número de teléfono (ej: 5211234567890): ");
-                if (phoneNumber) { // Solo si no se canceló
+            // Cerramos el prompt manual para liberar el bloqueo de impresión de QR
+            if (global.rlPrompt) {
+                global.rlPrompt.close();
+                global.rlPrompt = null;
+            }
+
+            if (choice && choice.trim() === '1') {
+                console.log("\nOpción 1 seleccionada: Código QR.");
+                if (lastQR) {
+                    console.log("Mostrando último QR recibido:");
+                    qrcode.generate(lastQR, { small: true });
+                } else {
+                    console.log("Esperando código QR...");
+                }
+            } else if (choice && choice.trim() === '2') {
+                // Reabrimos interfaz solo para el número
+                global.rlPrompt = readline.createInterface({
+                    input: process.stdin,
+                    output: process.stdout
+                });
+                const question2 = (query) => new Promise((resolve) => global.rlPrompt.question(query, resolve));
+
+                const phoneNumber = await question2("Por favor, ingresa tu número de teléfono (ej: 5211234567890): ");
+                if (phoneNumber) {
                     const code = await sock.requestPairingCode(phoneNumber.trim());
                     console.log(`\nTu código de emparejamiento es: ${code}\n`);
                     pairingCodeRequested = true;
                 }
-            }
-
-            // Si la interfaz sigue abierta, la cerramos
-            if (global.rlPrompt) {
                 global.rlPrompt.close();
                 global.rlPrompt = null;
             }
@@ -136,4 +160,3 @@ async function connectToWhatsApp() {
 }
 
 connectToWhatsApp();
-
